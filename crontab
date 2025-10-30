@@ -1,0 +1,2 @@
+# Run database backup every day at 02:00 and send output to stdout of PID 1
+0 2 * * * /usr/local/bin/pg-backup >> /proc/1/fd/1 2>&1
