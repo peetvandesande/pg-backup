@@ -15,6 +15,11 @@ From there you can manage the backup files yourself (e.g. rotate or delete older
 By default, the backup script gzips the output and the restore script expects gzipped files too.  
 If you change one script, update the other accordingly.
 
+## Building the image
+```console
+docker build -t pg-backup .
+```
+
 ## Pulling an existing image
 
 ### Using `docker run` to backup
@@ -35,7 +40,7 @@ docker run -d --name pg-backup \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DB=appdb \
-  peetvandesande/pg-backup
+  pg-backup
 ```
 
 This starts the cron-based backup process in the background.
@@ -54,7 +59,7 @@ docker run --rm --name pg-restore \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DB=appdb \
-  peetvandesande/pg-backup \
+  pg-backup \
   pg-restore "/backup/appdb-$(date -d 'yesterday' +%Y%m%d).sql.gz"
 ```
 
@@ -68,7 +73,7 @@ docker run --rm --name pg-restore \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DB=appdb \
-  peetvandesande/pg-backup \
+  pg-backup \
   pg-restore
 ```
 
