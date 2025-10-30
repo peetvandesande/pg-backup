@@ -6,6 +6,14 @@ This image is expected to run alongside a PostgreSQL database container; it does
 -   POSTGRES_USER
 -   POSTGRES_DB
 
+# Branches
+
+The `main` branch uses the Alpine-based image to keep things small. This branch is used to produce images with tags :17, :17-latest and :17-alpine.
+
+The `debian-host` branch uses the Debian based image, which has a backup:backup user by default with uid:gid of 34:34. Use the tag :17-debian to select this image.
+
+Functionality between the branches is the same.
+
 # How to use this image
 
 This container takes one daily backup (scheduled by `cron`) and stores it into the /backup directory.
@@ -102,7 +110,7 @@ services:
 
   pg-backup:
     <<: *postgres
-    image: peetvandesande/pg-backup:17
+    image: peetvandesande/pg-backup:17-latest
     container_name: postgres-backup
     volumes:
       - pg-backup:/backup
