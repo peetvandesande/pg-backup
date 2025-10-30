@@ -1,0 +1,2 @@
+crontab           merge=ours
+crontab.debian    merge=ours
