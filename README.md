@@ -8,9 +8,9 @@ This image is expected to run alongside a PostgreSQL database container; it does
 
 # Branches
 
-The `main` branch uses the Alpine-based image to keep things small. This branch is used to produce images with tags :17, :17-latest and :17-alpine.
+The `main` branch uses the Alpine-based image to keep things small. This branch is used to produce images with tags `:17`, `:17-latest` and `:17-alpine`.
 
-The `debian-host` branch uses the Debian based image, which has a backup:backup user by default with uid:gid of 34:34. Use the tag :17-debian to select this image.
+The `debian-host` branch uses the Debian based image, which has a backup:backup user by default with uid:gid of 34:34. Use the tag `:17-debian` to select this image.
 
 Functionality between the branches is the same.
 
