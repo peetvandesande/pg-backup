@@ -5,6 +5,7 @@ This image is expected to run alongside a PostgreSQL database container; it does
 -   POSTGRES_PASSWORD
 -   POSTGRES_USER
 -   POSTGRES_DB
+-   POSTGRES_HOST
 
 # Branches
 
@@ -32,10 +33,9 @@ docker build -t pg-backup .
 
 ### Using `docker run` to backup
 
-We will bind mount two local directories to be used by the container:
+We will bind mount a local directory to be used by the container:
 
 For example:
--   `/my/path/database` → database data directory
 -   `/my/path/backup` → backup storage directory
 
 Make sure these directories exist.
@@ -43,11 +43,11 @@ Make sure these directories exist.
 Run the container:
 ```console
 docker run -d --name pg-backup \
-  -v /my/path/database:/var/lib/postgresql/data \
   -v /my/path/backup:/backup \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DB=appdb \
+  -e POSTGRES_HOST=db \
   pg-backup
 ```
 
@@ -62,11 +62,11 @@ Example: restore yesterday’s backup file explicitly (GNU `date` syntax):
 
 ```console
 docker run --rm --name pg-restore \
-  -v /my/path/database:/var/lib/postgresql/data \
   -v /my/path/backup:/backup \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DB=appdb \
+  -e POSTGRES_HOST=db \
   pg-backup \
   pg-restore "/backup/appdb-$(date -d 'yesterday' +%Y%m%d).sql.gz"
 ```
@@ -76,11 +76,11 @@ docker run --rm --name pg-restore \
 
 ```console
 docker run --rm --name pg-restore \
-  -v /my/path/database:/var/lib/postgresql/data \
   -v /my/path/backup:/backup \
   -e POSTGRES_USER=user \
   -e POSTGRES_PASSWORD=secret \
   -e POSTGRES_DB=appdb \
+  -e POSTGRES_HOST=db \
   pg-backup \
   pg-restore
 ```
@@ -95,7 +95,7 @@ Here’s a minimal example:
 ```yaml
 services:
   # The container that runs the database (postgres)
-  db: &postgres
+  db:
     image: "postgres:17"
     container_name: postgres-db
     restart: unless-stopped
@@ -108,10 +108,15 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  # The container that runs the backup procedure
   pg-backup:
-    <<: *postgres
-    image: peetvandesande/pg-backup:17-latest
+    image: peetvandesande/pg-backup:17
     container_name: postgres-backup
+    environment:
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_USER=user
+      - POSTGRES_DB=appdb
+      - POSTGRES_HOST=db
     volumes:
       - pg-backup:/backup
 
