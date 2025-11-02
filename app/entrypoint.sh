@@ -20,14 +20,6 @@ if [ ! -d "$BACKUP_DEST" ]; then
   mkdir -p "$BACKUP_DEST"
 fi
 
-# Ownership / permissions
-if [ -n "$BACKUP_CHOWN" ]; then
-  chown -h "$BACKUP_CHOWN" "$BACKUP_DEST" 2>/dev/null || true
-fi
-if [ -n "$BACKUP_CHMOD" ]; then
-  chmod "$BACKUP_CHMOD" "$BACKUP_DEST" 2>/dev/null || true
-fi
-
 # Test writability
 if ! sh -c "touch '$BACKUP_DEST/.write_test' && rm -f '$BACKUP_DEST/.write_test'"; then
   log "ERROR: $BACKUP_DEST is not writable. Check bind mount or permissions."
