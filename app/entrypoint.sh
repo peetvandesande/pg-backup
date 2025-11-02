@@ -65,5 +65,5 @@ fi
 # ---------------------------------------------------------------------
 CROND_BIN="$(command -v crond)"
 echo "[entrypoint] Starting crond ($CROND_BIN)…"
-exec "$CROND_BIN" -f -l 2
+exec "$CROND_BIN" -f -l 2 /dev/stdout
 
