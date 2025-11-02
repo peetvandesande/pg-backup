@@ -3,7 +3,7 @@ FROM postgres:17-alpine
 RUN apk add --no-cache \
       coreutils \
  && mkdir -p /etc/crontabs \
- && echo '30	10	*	*	*	/usr/local/bin/backup >> /proc/1/fd/1 2>&1' >> /etc/crontabs/root \
+ && echo '0	2	*	*	*	/usr/local/bin/backup >> /proc/1/fd/1 2>&1' >> /etc/crontabs/root \
  && chmod 600 /etc/crontabs/root
 
 # Copy scripts from repo root 'app/' and make them executable
