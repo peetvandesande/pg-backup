@@ -2,7 +2,7 @@
 set -eu
 
 # Simple logger with ISO timestamp
-log() { printf "%s %s\n" "$(date -Is)" "$*"; }
+log() { printf "%s %s\n" "$(date -Is)" "$*" ; }
 
 # Required
 : "${POSTGRES_USER:?Must set POSTGRES_USER}"
