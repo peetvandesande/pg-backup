@@ -1,64 +1,123 @@
 # Makefile for building/pushing the single Alpine image from repo root
 
+# ---- Registry / Image -------------------------------------------------------
 DOCKER_REPO ?= peetvandesande/pg-backup
-TAG_ALPINE  ?= alpine
-LATEST_TAG  ?= latest
+VARIANT     ?= alpine
 
-# Local build (load into docker)
+# ---- Build platforms --------------------------------------------------------
 BUILD_PLATFORM ?= linux/amd64
-# Remote multi-arch push
-PLATFORMS ?= linux/amd64,linux/arm64
+PLATFORMS      ?= linux/amd64,linux/arm64
 
-IMAGE_ALPINE := $(DOCKER_REPO):$(TAG_ALPINE)
-IMAGE_ALPINE_LATEST := $(DOCKER_REPO):$(LATEST_TAG)
-
-# Labels
+# ---- Git metadata -----------------------------------------------------------
+BRANCH   := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
+SANITIZED_BRANCH := $(subst /,-,$(BRANCH))          # docker-safe branch tag
 GIT_SHA  := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
-BUILD_OPTS := --label org.opencontainers.image.revision=$(GIT_SHA)
+GIT_TAG  := $(shell git describe --tags --abbrev=0 2>/dev/null)
+GIT_REF  := $(shell git describe --tags --always --dirty --abbrev=8 2>/dev/null)
 
-.PHONY: help
-help:
-	@echo "Targets:"
-	@echo "  buildx-create     Create/select buildx builder 'multiarch'"
-	@echo "  build             Build Alpine image locally (--load)"
-	@echo "  push              Build+push Alpine (multi-arch)"
-	@echo ""
-	@echo "Vars:"
-	@echo "  DOCKER_REPO=$(DOCKER_REPO)"
-	@echo "  TAG_ALPINE=$(TAG_ALPINE)"
-	@echo "  BUILD_PLATFORM=$(BUILD_PLATFORM)"
-	@echo "  PLATFORMS=$(PLATFORMS)"
+# ---- Tags (clean + deduped) -------------------------------------------------
+# You may override explicitly: make push TAGS="dev dev-$(VARIANT)"
+ifeq ($(origin TAGS), undefined)
+  ifeq ($(BRANCH),dev)
+    TAGS := \
+      dev \
+      dev-$(VARIANT) \
+      dev-$(VARIANT)-$(GIT_SHA) \
+      dev-$(GIT_SHA)
+  else ifeq ($(BRANCH),main)
+    ifneq ($(strip $(GIT_TAG)),)
+      TAGS := \
+        latest \
+        $(VARIANT) \
+        $(GIT_TAG) \
+        $(GIT_TAG)-$(VARIANT) \
+        $(GIT_TAG)-$(VARIANT)-$(GIT_SHA) \
+        $(GIT_SHA)
+    else
+      TAGS := \
+        latest \
+        $(VARIANT) \
+        $(VARIANT)-$(GIT_SHA) \
+        $(GIT_SHA)
+    endif
+  else
+    TAGS := \
+      $(SANITIZED_BRANCH) \
+      $(SANITIZED_BRANCH)-$(VARIANT) \
+      $(SANITIZED_BRANCH)-$(GIT_SHA)
+  endif
+endif
 
-.PHONY: buildx-create
-buildx-create:
-	@if ! docker buildx inspect multiarch >/dev/null 2>&1; then \
-	  docker buildx create --name multiarch --use >/dev/null; \
-	  echo "Created and selected buildx builder 'multiarch'"; \
-	else \
-	  docker buildx use multiarch >/dev/null; \
-	  echo "Using existing buildx builder 'multiarch'"; \
+# Expand to -t args (no extra spaces)
+TFLAGS := $(foreach t,$(TAGS),-t $(DOCKER_REPO):$(t))
+
+# ---- OCI labels -------------------------------------------------------------
+REPO_URL  := $(shell git config --get remote.origin.url 2>/dev/null)
+BUILD_DATE:= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_OPTS ?= \
+  --label org.opencontainers.image.title="pg-backup" \
+  --label org.opencontainers.image.description="PostgreSQL backup/restore (client-only) on Alpine" \
+  --label org.opencontainers.image.url="$(REPO_URL)" \
+  --label org.opencontainers.image.source="$(REPO_URL)" \
+  --label org.opencontainers.image.revision="$(GIT_SHA)" \
+  --label org.opencontainers.image.version="$(GIT_TAG)" \
+  --label org.opencontainers.image.created="$(BUILD_DATE)"
+
+# ---- Safety: block dirty tree on main ---------------------------------------
+# Set BUILD_DIRTY_OK=1 to bypass (e.g., make push BUILD_DIRTY_OK=1)
+.PHONY: assert-clean
+assert-clean:
+	@if [ "$(BRANCH)" = "main" ] && [ -z "$(BUILD_DIRTY_OK)" ]; then \
+	  git diff-index --quiet HEAD -- || { \
+	    echo "Refusing to build on 'main' with a dirty working tree (set BUILD_DIRTY_OK=1 to override)"; \
+	    exit 1; \
+	  }; \
 	fi
 
+# ---- buildx helper ----------------------------------------------------------
+.PHONY: buildx-create
+buildx-create:
+	@docker buildx inspect multiarch >/dev/null 2>&1 || docker buildx create --name multiarch --use
+	@docker buildx use multiarch >/dev/null 2>&1 || true
+
+# ---- Local build (load) -----------------------------------------------------
 .PHONY: build
-build: buildx-create
+build: assert-clean buildx-create
 	docker buildx build \
 	  --builder multiarch \
 	  --platform $(BUILD_PLATFORM) \
 	  --load \
 	  $(BUILD_OPTS) \
-	  -t $(IMAGE_ALPINE) \
-	  -t $(IMAGE_ALPINE_LATEST) \
+	  $(TFLAGS) \
 	  -f alpine/Dockerfile \
 	  .
 
+# ---- Multi-arch push --------------------------------------------------------
 .PHONY: push
-push: buildx-create
+push: assert-clean buildx-create
 	docker buildx build \
 	  --builder multiarch \
 	  --platform $(PLATFORMS) \
 	  --push \
 	  $(BUILD_OPTS) \
-	  -t $(IMAGE_ALPINE) \
-	  -t $(IMAGE_ALPINE_LATEST) \
+	  $(TFLAGS) \
 	  -f alpine/Dockerfile \
 	  .
+
+# ---- Utilities --------------------------------------------------------------
+.PHONY: print
+print:
+	@echo "Repo:     $(DOCKER_REPO)"
+	@echo "Branch:   $(BRANCH)"
+	@echo "Git tag:  $(GIT_TAG)"
+	@echo "Git ref:  $(GIT_REF)"
+	@echo "Git sha:  $(GIT_SHA)"
+	@echo "Variant:  $(VARIANT)"
+	@echo "Tags:"
+	@$(foreach t,$(TAGS),echo "  - $(t)";)
+	@echo "Platforms(build): $(BUILD_PLATFORM)"
+	@echo "Platforms(push):  $(PLATFORMS)"
+
+.PHONY: tag-list
+tag-list:
+	@$(foreach t,$(TAGS),echo $(DOCKER_REPO):$(t);)
