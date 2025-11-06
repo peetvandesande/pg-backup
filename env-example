@@ -1,0 +1,4 @@
+# .env for Nextcloud + PostgreSQL + Backups stack
+POSTGRES_DB=nextcloud
+POSTGRES_USER=nextcloud
+POSTGRES_PASSWORD=change_me_strong
