@@ -7,6 +7,14 @@ PLAT_BUILD             ?= linux/amd64
 PLAT_PUSH              ?= linux/amd64,linux/arm64
 BUILDER                ?= multiarch
 
+# --- Build context + Dockerfile location -------------------------------------
+VARIANT        ?= alpine
+BUILD_CONTEXT  ?= .
+DOCKERFILE     ?= $(VARIANT)/Dockerfile
+
+# Optional: also tag with the variant name
+TAG_VARIANT    := -$(VARIANT)
+
 # Optional metadata (edit per project)
 IMAGE_TITLE            ?= file-backup
 IMAGE_DESCRIPTION      ?= "Simple backup/restore utility (Alpine)"
@@ -117,7 +125,40 @@ build-multi:
 		--label org.opencontainers.image.created="$(GIT_CREATED)" \
 		-t $(REPO):v$(VERSION) \
 		-t $(REPO):latest \
-		--push .
+		-t $(REPO):v$(VERSION)$(TAG_VARIANT) \
+		-f $(DOCKERFILE) \
+		--push \
+		$(BUILD_CONTEXT)
 
 push-tag:
 	@echo "Git tag pushed: v$(VERSION)"
+
+# --- Dev builds (no version tag bump, no git tagging) ------------------------
+
+.PHONY: build-dev push-dev
+
+# Build local image for testing (no push)
+build-dev:
+	docker buildx build \
+		--builder $(BUILDER) \
+		--platform $(PLAT_BUILD) \
+		--load \
+		-t $(REPO):dev \
+		-t $(REPO):dev$(TAG_VARIANT) \
+		-f $(DOCKERFILE) \
+		$(BUILD_CONTEXT)
+
+# Build and push multi-arch dev image
+push-dev:
+	docker buildx build \
+		--builder $(BUILDER) \
+		--platform $(PLAT_PUSH) \
+		--label org.opencontainers.image.revision="$(GIT_SHA)" \
+		--label org.opencontainers.image.created="$(GIT_CREATED)" \
+		-t $(REPO):dev \
+		-t $(REPO):dev$(TAG_VARIANT) \
+		-f $(DOCKERFILE) \
+		--push \
+		$(BUILD_CONTEXT)
+	@echo "✅ Pushed: $(REPO):dev"
+
