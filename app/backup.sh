@@ -2,8 +2,9 @@
 set -eu
 # ------------------------------------------------------------
 # pg-backup :: backup.sh
-# - Creates a timestamped PostgreSQL dump (.sql, .sql.gz, .sql.zst, .sql.bz2).
-# - Busybox/Alpine/GNU-userland friendly.
+# - Creates a timestamped PostgreSQL dump (.sql[.gz|.bz2|.zst]).
+# - Portable by default: --no-owner --no-privileges (configurable).
+# - Busybox/Alpine/GNU userland friendly.
 # - Booleans are 1/0 (VERIFY_SHA256).
 # - chown/chmod apply automatically if CHOWN_UID/GID or CHMOD_MODE are provided.
 # ------------------------------------------------------------
@@ -17,7 +18,9 @@ set -eu
 #   BACKUP_NAME_PREFIX   (default=postgres-$POSTGRES_DB)
 #   COMPRESS             (default=gz) one of: gz | bz2 | zst | none
 #   COMPRESS_LEVEL       (optional) e.g. 1..9 for gz/bz2, 1..22 for zstd
-#   VERIFY_SHA256        (default=1) 1=write .sha256 next to dump
+#   VERIFY_SHA256        (default=1)  1=write .sha256 next to dump
+#   DUMP_NO_OWNER        (default=1)  1=add --no-owner to pg_dump
+#   DUMP_NO_PRIVILEGES   (default=1)  1=add --no-privileges to pg_dump
 #   CHOWN_UID            (optional) numeric uid or name
 #   CHOWN_GID            (optional) numeric gid or name
 #   CHMOD_MODE           (optional) e.g., 0640
@@ -40,6 +43,9 @@ PREFIX="${BACKUP_NAME_PREFIX:-$PREFIX_DEFAULT}"
 COMPRESS="${COMPRESS:-gz}"            # gz | bz2 | zst | none
 COMPRESS_LEVEL="${COMPRESS_LEVEL:-}"  # optional
 VERIFY_SHA256="${VERIFY_SHA256:-1}"   # 1/0
+
+DUMP_NO_OWNER="${DUMP_NO_OWNER:-1}"               # 1/0
+DUMP_NO_PRIVILEGES="${DUMP_NO_PRIVILEGES:-1}"     # 1/0
 
 CHOWN_UID="${CHOWN_UID:-}"
 CHOWN_GID="${CHOWN_GID:-}"
@@ -71,37 +77,39 @@ log "Starting PostgreSQL dump → ${OUT}"
 export PGPASSWORD="$PGPASS"
 PGCOMMON="-h $PGHOST -p $PGPORT -U $PGUSER -d $PGDB"
 
+PGDUMP_OPTS=""
+[ "$DUMP_NO_OWNER" = "1" ] && PGDUMP_OPTS="$PGDUMP_OPTS --no-owner"
+[ "$DUMP_NO_PRIVILEGES" = "1" ] && PGDUMP_OPTS="$PGDUMP_OPTS --no-privileges"
+
 # Build pipeline based on compression
 case "$COMPRESS" in
   gz)
-    # gzip: use -c for stdout, level via -<N> if provided
     if [ -n "$COMPRESS_LEVEL" ]; then
-      sh -c "pg_dump $PGCOMMON | gzip -c -${COMPRESS_LEVEL} > '$OUT'"
+      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | gzip -c -${COMPRESS_LEVEL} > '$OUT'"
     else
-      sh -c "pg_dump $PGCOMMON | gzip -c > '$OUT'"
+      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | gzip -c > '$OUT'"
     fi
     ;;
   bz2)
     if [ -n "$COMPRESS_LEVEL" ]; then
-      sh -c "pg_dump $PGCOMMON | bzip2 -c -${COMPRESS_LEVEL} > '$OUT'"
+      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | bzip2 -c -${COMPRESS_LEVEL} > '$OUT'"
     else
-      sh -c "pg_dump $PGCOMMON | bzip2 -c > '$OUT'"
+      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | bzip2 -c > '$OUT'"
     fi
     ;;
   zst)
-    # zstd: -q quiet, -T0 multithread, -# level if provided
     if command -v zstd >/dev/null 2>&1; then
       if [ -n "$COMPRESS_LEVEL" ]; then
-        sh -c "pg_dump $PGCOMMON | zstd -q -z -T0 -${COMPRESS_LEVEL} -o '$OUT'"
+        sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | zstd -q -z -T0 -${COMPRESS_LEVEL} -o '$OUT'"
       else
-        sh -c "pg_dump $PGCOMMON | zstd -q -z -T0 -o '$OUT'"
+        sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | zstd -q -z -T0 -o '$OUT'"
       fi
     else
       log "ERROR: zstd not available in image; set COMPRESS=none|gz|bz2" ; exit 1
     fi
     ;;
   none)
-    sh -c "pg_dump $PGCOMMON > '$OUT'"
+    sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS > '$OUT'"
     ;;
 esac
 
@@ -120,7 +128,6 @@ fi
 # ---- ownership / permissions (auto-apply if values provided) ----------------
 # If only one of CHOWN_UID/CHOWN_GID is set, fill the other from current file metadata.
 if [ -n "${CHOWN_UID}" ] || [ -n "${CHOWN_GID}" ]; then
-  # Prefer GNU/coreutils stat -c; fallback to ls -n parsing
   current_uid="$(stat -c %u "$OUT" 2>/dev/null || true)"
   current_gid="$(stat -c %g "$OUT" 2>/dev/null || true)"
   if [ -z "${current_uid}" ] || [ -z "${current_gid}" ]; then
@@ -128,7 +135,6 @@ if [ -n "${CHOWN_UID}" ] || [ -n "${CHOWN_GID}" ]; then
     line="$(ls -n "$OUT" 2>/dev/null)"
     set -e
     if [ -n "$line" ]; then
-      # ls -n: perms links UID GID size date name
       current_uid="$(printf "%s\n" "$line" | awk '{print $3}')"
       current_gid="$(printf "%s\n" "$line" | awk '{print $4}')"
     fi

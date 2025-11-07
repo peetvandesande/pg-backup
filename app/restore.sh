@@ -1,107 +1,111 @@
 #!/bin/sh
 set -eu
+# ------------------------------------------------------------
+# pg-backup :: restore
+# - Restores a PostgreSQL dump (.sql[.gz|.bz2|.zst]) into a target DB.
+# - Defaults to portable restore by stripping owner/ACL lines (configurable).
+# ------------------------------------------------------------
+# Usage:
+#   restore [<dump_file_or_dir>] [<dbname>]   # if dump is a dir, selects newest by BACKUP_NAME_PREFIX
+#
+# Env vars:
+#   POSTGRES_USER        (required)
+#   POSTGRES_PASSWORD    (required)
+#   POSTGRES_DB          (default: same as provided arg or env)
+#   POSTGRES_HOST        (default=db)
+#   POSTGRES_PORT        (default=5432)
+#   BACKUPS_DIR          (default=/backups)  # used when searching for newest
+#   BACKUP_NAME_PREFIX   (optional)          # used when selecting newest
+#   RESTORE_STRIP_ACL    (default=1)         # 1=strip owner/privilege lines
+#   PSQL_ON_ERROR_STOP   (default=1)         # fail fast on psql errors
+# ------------------------------------------------------------
 
 log() { printf "%s %s\n" "$(date -Is)" "$*"; }
 
-# Required for DB connection
-: "${POSTGRES_USER:?Must set POSTGRES_USER}"
-: "${POSTGRES_PASSWORD:?Must set POSTGRES_PASSWORD}"
-: "${POSTGRES_DB:?Must set POSTGRES_DB}"
-
-POSTGRES_HOST="${POSTGRES_HOST:-db}"
-POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+PGUSER="${POSTGRES_USER:-}"
+PGPASS="${POSTGRES_PASSWORD:-}"
+PGHOST="${POSTGRES_HOST:-db}"
+PGPORT="${POSTGRES_PORT:-5432}"
+PGDB_ENV="${POSTGRES_DB:-}"
 
 BACKUP_DIR="${BACKUPS_DIR:-/backups}"
-PREFIX="${BACKUP_NAME_PREFIX:-postgres-${POSTGRES_DB}}"
-VERIFY="${VERIFY_SHA256:-1}"   # 1 = verify if .sha256 exists; 0 = skip
+PREFIX="${BACKUP_NAME_PREFIX:-}"
+RESTORE_STRIP_ACL="${RESTORE_STRIP_ACL:-1}"
+PSQL_ON_ERROR_STOP="${PSQL_ON_ERROR_STOP:-1}"
 
-# Busybox-friendly newest-file resolver
-find_latest() {
-  tmp="$(mktemp)"
-  for pat in \
-    "$BACKUP_DIR/${PREFIX}*.sql.gz" \
-    "$BACKUP_DIR/${PREFIX}*.sql.bz2" \
-    "$BACKUP_DIR/${PREFIX}*.sql.zst" \
-    "$BACKUP_DIR/${PREFIX}*.sql"
-  do
-    for f in $pat; do
-      [ -e "$f" ] || continue
-      printf '%s\0' "$f" >> "$tmp"
-    done
-  done
-  if [ -s "$tmp" ]; then
-    CANDIDATE="$(xargs -0 ls -1t 2>/dev/null <"$tmp" | head -n1 || true)"
-    rm -f "$tmp"
-    [ -n "${CANDIDATE:-}" ] && printf '%s\n' "$CANDIDATE" || return 1
+[ -n "$PGUSER" ] || { log "ERROR: POSTGRES_USER is required"; exit 1; }
+[ -n "$PGPASS" ] || { log "ERROR: POSTGRES_PASSWORD is required"; exit 1; }
+
+export PGPASSWORD="$PGPASS"
+
+# ---- locate dump ------------------------------------------------------------
+DUMP_PATH="${1:-}"           # optional: file or directory
+TARGET_DB="${2:-$PGDB_ENV}"  # optional; fallback to env
+
+if [ -z "$DUMP_PATH" ] || [ -d "$DUMP_PATH" ]; then
+  # search newest in BACKUPS_DIR by prefix (if provided) or any .sql*
+  search_dir="${DUMP_PATH:-$BACKUP_DIR}"
+  log "Scanning for newest archive in: $search_dir"
+  if [ -n "$PREFIX" ]; then
+    newest="$(ls -1t "$search_dir"/"$PREFIX"-*.sql* 2>/dev/null | head -n1 || true)"
   else
-    rm -f "$tmp"
-    return 1
+    newest="$(ls -1t "$search_dir"/*.sql* 2>/dev/null | head -n1 || true)"
   fi
-}
-
-# Resolve backup file (arg or latest)
-ARG_FILE="${1:-}"
-BACKUP_FILE=""
-if [ -n "$ARG_FILE" ]; then
-  [ -f "$ARG_FILE" ] || { log "ERROR: Provided file does not exist: $ARG_FILE"; exit 1; }
-  BACKUP_FILE="$ARG_FILE"
-  log "Using explicit backup file: $BACKUP_FILE"
+  DUMP_FILE="${newest:-}"
 else
-  log "PREFIX: ${PREFIX:-<none>}"
-  log "Scanning for newest archive in: $BACKUP_DIR"
-  CANDIDATE="$(find_latest || true)"
-  if [ -n "${CANDIDATE:-}" ] && [ -f "$CANDIDATE" ]; then
-    BACKUP_FILE="$CANDIDATE"
-    log "Selected newest archive: $BACKUP_FILE"
-  else
-    log "ERROR: Backup file '' not found. Provide a file path or ensure historical backups exist." >&2
-    exit 1
-  fi
+  DUMP_FILE="$DUMP_PATH"
 fi
 
-# Verify checksum if requested
-if [ "$VERIFY" = "1" ] && [ -f "${BACKUP_FILE}.sha256" ]; then
-  log "Verifying checksum: ${BACKUP_FILE}.sha256"
-  if ! sha256sum -c "${BACKUP_FILE}.sha256"; then
-    log "ERROR: SHA-256 verification failed for ${BACKUP_FILE}" >&2
-    exit 1
-  fi
+[ -n "${DUMP_FILE:-}" ] || { log "ERROR: No dump file found. Provide a path or ensure backups exist."; exit 1; }
+log "Selected dump: $DUMP_FILE"
+
+# infer db name if not provided
+if [ -z "$TARGET_DB" ]; then
+  # try to derive from prefix in filename: <prefix>-YYYYMMDD.sql[.*]
+  base="$(basename "$DUMP_FILE")"
+  TARGET_DB="${base%%-*}"
+  log "Inferred target database: $TARGET_DB"
 fi
 
-export PGPASSWORD="${POSTGRES_PASSWORD}"
-HOST_OPTS="-h '${POSTGRES_HOST}' -p '${POSTGRES_PORT}'"
+[ -n "$TARGET_DB" ] || { log "ERROR: Target database name not provided or inferable."; exit 1; }
 
-# Decompress and restore with ON_ERROR_STOP
-case "$BACKUP_FILE" in
-  *.sql.gz)
-    if gzip -dc "${BACKUP_FILE}" | sh -c "psql ${HOST_OPTS} -U '${POSTGRES_USER}' -d '${POSTGRES_DB}' --set=ON_ERROR_STOP=1"; then
-      log "Restore completed successfully."
-    else
-      log "Restore FAILED." >&2; exit 1
-    fi
-    ;;
-  *.sql.bz2)
-    if bzip2 -dc "${BACKUP_FILE}" | sh -c "psql ${HOST_OPTS} -U '${POSTGRES_USER}' -d '${POSTGRES_DB}' --set=ON_ERROR_STOP=1"; then
-      log "Restore completed successfully."
-    else
-      log "Restore FAILED." >&2; exit 1
-    fi
-    ;;
-  *.sql.zst)
-    if zstd -dc "${BACKUP_FILE}" | sh -c "psql ${HOST_OPTS} -U '${POSTGRES_USER}' -d '${POSTGRES_DB}' --set=ON_ERROR_STOP=1"; then
-      log "Restore completed successfully."
-    else
-      log "Restore FAILED." >&2; exit 1
-    fi
-    ;;
-  *.sql)
-    if sh -c "psql ${HOST_OPTS} -U '${POSTGRES_USER}' -d '${POSTGRES_DB}' --set=ON_ERROR_STOP=1" < "${BACKUP_FILE}"; then
-      log "Restore completed successfully."
-    else
-      log "Restore FAILED." >&2; exit 1
-    fi
-    ;;
-  *)
-    log "ERROR: Unsupported backup extension: $BACKUP_FILE" >&2; exit 1
-    ;;
+# ---- checksum ---------------------------------------------------------------
+SHA="${DUMP_FILE}.sha256"
+if [ -f "$SHA" ]; then
+  log "Verifying checksum: $SHA"
+  sha256sum -c "$SHA" >/dev/null
+fi
+
+# ---- prepare filter (strip ACL/owner if requested) --------------------------
+FILTER_CMD="cat"
+if [ "$RESTORE_STRIP_ACL" = "1" ]; then
+  # Remove lines like: ALTER ... OWNER TO <role>;  GRANT ...; REVOKE ...;
+  FILTER_CMD="sed -E '/^ALTER .* OWNER TO /d; /^GRANT /d; /^REVOKE /d'"
+fi
+
+# ---- decompressor -----------------------------------------------------------
+DECOMPRESSOR="cat"
+case "$DUMP_FILE" in
+  *.sql.gz)  DECOMPRESSOR="zcat" ;;
+  *.sql.bz2) DECOMPRESSOR="bzcat" ;;
+  *.sql.zst) DECOMPRESSOR="zstd -d -c" ;;
+  *.sql)     DECOMPRESSOR="cat" ;;
+  *) log "ERROR: Unknown dump file extension: $DUMP_FILE"; exit 1 ;;
 esac
+
+# ---- restore ---------------------------------------------------------------
+ON_ERROR=""
+[ "$PSQL_ON_ERROR_STOP" = "1" ] && ON_ERROR="-v ON_ERROR_STOP=1"
+
+log "Restoring into database: $TARGET_DB"
+set +e
+sh -c "$DECOMPRESSOR \"$DUMP_FILE\" | $FILTER_CMD | psql -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" $ON_ERROR \"$TARGET_DB\""
+rc=$?
+set -e
+
+if [ $rc -ne 0 ]; then
+  log "Restore FAILED."
+  exit $rc
+fi
+
+log "Restore completed successfully."
