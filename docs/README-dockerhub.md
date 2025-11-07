@@ -81,3 +81,21 @@ Full restore workflow (including volume recreation):
 → https://github.com/peetvandesande/pg-backup/docs/postgres-backup-restore.md
 
 ---
+
+### Ownership / Permissions
+
+You can optionally set file ownership and/or permissions on the dump files:
+
+```bash
+# Force UID=33, keep existing GID
+-e CHOWN_UID=33
+
+# Force GID=33, keep existing UID
+-e CHOWN_GID=33
+
+# Force both explicitly
+-e CHOWN_UID=33 -e CHOWN_GID=33
+
+# Apply file mode to .sql[.*] and .sha256
+-e CHMOD_MODE=0640
+```
