@@ -121,3 +121,45 @@ print:
 .PHONY: tag-list
 tag-list:
 	@$(foreach t,$(TAGS),echo $(DOCKER_REPO):$(t);)
+
+# --- Release ------------------------------------------------------------------
+
+# Version must be passed, e.g.:
+#   make release VERSION=1.2.3
+VERSION ?=
+
+release: check-version confirm-release tag-version build-multi push-images push-tag
+	@echo "✅ Release completed successfully."
+
+check-version:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "ERROR: VERSION must be specified (example: make release VERSION=1.2.3)"; \
+		exit 1; \
+	fi
+	@if ! echo "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "ERROR: VERSION must follow semantic versioning (e.g., 1.2.3)"; \
+		exit 1; \
+	fi
+
+confirm-release:
+	@echo "Releasing version v$(VERSION) for repository $(REPO)"
+	@printf "Proceed? (y/N) "; read ans; [ "$$ans" = "y" ]
+
+tag-version:
+	git tag -a v$(VERSION) -m "Release v$(VERSION)"
+	git push --tags
+
+build-multi:
+	docker buildx build \
+		--builder multiarch \
+		--platform linux/amd64,linux/arm64 \
+		--label org.opencontainers.image.version="v$(VERSION)" \
+		-t $(REPO):v$(VERSION) \
+		-t $(REPO):latest \
+		--push .
+
+push-images:
+	@echo "Images already pushed in build step."
+
+push-tag:
+	@echo "Tag pushed to git: v$(VERSION)"
