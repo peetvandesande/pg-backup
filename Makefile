@@ -1,135 +1,89 @@
-# Makefile for building/pushing the single Alpine image from repo root
+# =====================[ Release / Versioning ]=====================
+# Required per-repo var:
+#   REPO ?= peetvandesande/file-backup   # or peetvandesande/pg-backup
+REPO ?= peetvandesande/pg-backup
 
-# ---- Registry / Image -------------------------------------------------------
-DOCKER_REPO ?= peetvandesande/pg-backup
-VARIANT     ?= alpine
+PLAT_BUILD             ?= linux/amd64
+PLAT_PUSH              ?= linux/amd64,linux/arm64
+BUILDER                ?= multiarch
 
-# ---- Build platforms --------------------------------------------------------
-BUILD_PLATFORM ?= linux/amd64
-PLATFORMS      ?= linux/amd64,linux/arm64
+# Optional metadata (edit per project)
+IMAGE_TITLE            ?= file-backup
+IMAGE_DESCRIPTION      ?= "Simple backup/restore utility (Alpine)"
+IMAGE_SOURCE_URL    ?= $(shell git remote get-url origin | sed 's/^git@/https:\/\//; s/\.git$$//; s/:/\//')
+IMAGE_PROJECT_URL   ?= $(IMAGE_SOURCE_URL)
 
-# ---- Git metadata -----------------------------------------------------------
-BRANCH   := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
-SANITIZED_BRANCH := $(subst /,-,$(BRANCH))          # docker-safe branch tag
-GIT_SHA  := $(shell git rev-parse --short=8 HEAD 2>/dev/null)
-GIT_TAG  := $(shell git describe --tags --abbrev=0 2>/dev/null)
-GIT_REF  := $(shell git describe --tags --always --dirty --abbrev=8 2>/dev/null)
+# Derived metadata
+GIT_SHA                := $(shell git rev-parse --short=8 HEAD)
+GIT_CREATED            := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 
-# ---- Tags (clean + deduped) -------------------------------------------------
-# You may override explicitly: make push TAGS="dev dev-$(VARIANT)"
-ifeq ($(origin TAGS), undefined)
-  ifeq ($(BRANCH),dev)
-    TAGS := \
-      dev \
-      dev-$(VARIANT) \
-      dev-$(VARIANT)-$(GIT_SHA) \
-      dev-$(GIT_SHA)
-  else ifeq ($(BRANCH),main)
-    ifneq ($(strip $(GIT_TAG)),)
-      TAGS := \
-        latest \
-        $(VARIANT) \
-        $(GIT_TAG) \
-        $(GIT_TAG)-$(VARIANT) \
-        $(GIT_TAG)-$(VARIANT)-$(GIT_SHA) \
-        $(GIT_SHA)
-    else
-      TAGS := \
-        latest \
-        $(VARIANT) \
-        $(VARIANT)-$(GIT_SHA) \
-        $(GIT_SHA)
-    endif
-  else
-    TAGS := \
-      $(SANITIZED_BRANCH) \
-      $(SANITIZED_BRANCH)-$(VARIANT) \
-      $(SANITIZED_BRANCH)-$(GIT_SHA)
-  endif
-endif
+# ---------- helpers ----------
+LATEST_TAG             := $(shell git tag --list 'v*' | sort -V | tail -1)
+LATEST_VERSION_STRIP   := $(shell echo "$(LATEST_TAG)" | sed -E 's/^v//')
+# If no tags yet, start at 0.0.0
+LATEST_SAFE            := $(if $(LATEST_VERSION_STRIP),$(LATEST_VERSION_STRIP),0.0.0)
 
-# Expand to -t args (no extra spaces)
-TFLAGS := $(foreach t,$(TAGS),-t $(DOCKER_REPO):$(t))
+# bump functions (pure make/shell)
+define bump_patch
+echo "$(LATEST_SAFE)" | awk -F. '{printf "%d.%d.%d\n", $$1, $$2, $$3+1}'
+endef
+define bump_minor
+echo "$(LATEST_SAFE)" | awk -F. '{printf "%d.%d.%d\n", $$1, $$2+1, 0}'
+endef
+define bump_major
+echo "$(LATEST_SAFE)" | awk -F. '{printf "%d.%d.%d\n", $$1+1, 0, 0}'
+endef
 
-# ---- OCI labels -------------------------------------------------------------
-REPO_URL  := $(shell git config --get remote.origin.url 2>/dev/null)
-BUILD_DATE:= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-BUILD_OPTS ?= \
-  --label org.opencontainers.image.title="pg-backup" \
-  --label org.opencontainers.image.description="PostgreSQL backup/restore (client-only) on Alpine" \
-  --label org.opencontainers.image.url="$(REPO_URL)" \
-  --label org.opencontainers.image.source="$(REPO_URL)" \
-  --label org.opencontainers.image.revision="$(GIT_SHA)" \
-  --label org.opencontainers.image.version="$(GIT_TAG)" \
-  --label org.opencontainers.image.created="$(BUILD_DATE)"
+.PHONY: print-version next-patch next-minor next-major \
+        release release-patch release-minor release-major \
+        check-clean check-version tag-version build-multi push-tag
 
-# ---- Safety: block dirty tree on main ---------------------------------------
-# Set BUILD_DIRTY_OK=1 to bypass (e.g., make push BUILD_DIRTY_OK=1)
-.PHONY: assert-clean
-assert-clean:
-	@if [ "$(BRANCH)" = "main" ] && [ -z "$(BUILD_DIRTY_OK)" ]; then \
-	  git diff-index --quiet HEAD -- || { \
-	    echo "Refusing to build on 'main' with a dirty working tree (set BUILD_DIRTY_OK=1 to override)"; \
-	    exit 1; \
-	  }; \
-	fi
+print-version:
+	@echo "Repo:           $(REPO)"
+	@echo "Branch:         $(GIT_BRANCH)"
+	@echo "Latest tag:     $(if $(LATEST_TAG),$(LATEST_TAG),<none>)"
+	@echo "Latest version: $(LATEST_SAFE)"
+	@echo "Next (patch):   v$$( $(bump_patch) )"
+	@echo "Next (minor):   v$$( $(bump_minor) )"
+	@echo "Next (major):   v$$( $(bump_major) )"
+	@echo "Git SHA:        $(GIT_SHA)"
+	@echo "Created:        $(GIT_CREATED)"
+	@echo "Platforms:      build=$(PLAT_BUILD) push=$(PLAT_PUSH)"
 
-# ---- buildx helper ----------------------------------------------------------
-.PHONY: buildx-create
-buildx-create:
-	@docker buildx inspect multiarch >/dev/null 2>&1 || docker buildx create --name multiarch --use
-	@docker buildx use multiarch >/dev/null 2>&1 || true
+next-patch:
+	@$(bump_patch)
 
-# ---- Local build (load) -----------------------------------------------------
-.PHONY: build
-build: assert-clean buildx-create
-	docker buildx build \
-	  --builder multiarch \
-	  --platform $(BUILD_PLATFORM) \
-	  --load \
-	  $(BUILD_OPTS) \
-	  $(TFLAGS) \
-	  -f alpine/Dockerfile \
-	  .
+next-minor:
+	@$(bump_minor)
 
-# ---- Multi-arch push --------------------------------------------------------
-.PHONY: push
-push: assert-clean buildx-create
-	docker buildx build \
-	  --builder multiarch \
-	  --platform $(PLATFORMS) \
-	  --push \
-	  $(BUILD_OPTS) \
-	  $(TFLAGS) \
-	  -f alpine/Dockerfile \
-	  .
+next-major:
+	@$(bump_major)
 
-# ---- Utilities --------------------------------------------------------------
-.PHONY: print
-print:
-	@echo "Repo:     $(DOCKER_REPO)"
-	@echo "Branch:   $(BRANCH)"
-	@echo "Git tag:  $(GIT_TAG)"
-	@echo "Git ref:  $(GIT_REF)"
-	@echo "Git sha:  $(GIT_SHA)"
-	@echo "Variant:  $(VARIANT)"
-	@echo "Tags:"
-	@$(foreach t,$(TAGS),echo "  - $(t)";)
-	@echo "Platforms(build): $(BUILD_PLATFORM)"
-	@echo "Platforms(push):  $(PLATFORMS)"
-
-.PHONY: tag-list
-tag-list:
-	@$(foreach t,$(TAGS),echo $(DOCKER_REPO):$(t);)
-
-# --- Release ------------------------------------------------------------------
-
-# Version must be passed, e.g.:
+# ===== Release entry points =====
+# Usage:
 #   make release VERSION=1.2.3
-VERSION ?=
+#   make release-patch
+#   make release-minor
+#   make release-major
 
-release: check-version confirm-release tag-version build-multi push-images push-tag
-	@echo "✅ Release completed successfully."
+release: check-clean check-version confirm-release tag-version build-multi push-tag
+	@echo "✅ Release v$(VERSION) completed for $(REPO)"
+
+release-patch:
+	@$(MAKE) release VERSION=$$($(bump_patch))
+
+release-minor:
+	@$(MAKE) release VERSION=$$($(bump_minor))
+
+release-major:
+	@$(MAKE) release VERSION=$$($(bump_major))
+
+check-clean:
+	@if ! git diff-index --quiet HEAD --; then \
+		echo "ERROR: Working tree not clean. Commit or stash changes before releasing."; \
+		exit 1; \
+	fi
 
 check-version:
 	@if [ -z "$(VERSION)" ]; then \
@@ -137,29 +91,33 @@ check-version:
 		exit 1; \
 	fi
 	@if ! echo "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
-		echo "ERROR: VERSION must follow semantic versioning (e.g., 1.2.3)"; \
+		echo "ERROR: VERSION must follow semver (e.g., 1.2.3)"; \
 		exit 1; \
 	fi
 
 confirm-release:
-	@echo "Releasing version v$(VERSION) for repository $(REPO)"
+	@echo "Releasing v$(VERSION) for $(REPO)"
 	@printf "Proceed? (y/N) "; read ans; [ "$$ans" = "y" ]
 
 tag-version:
 	git tag -a v$(VERSION) -m "Release v$(VERSION)"
 	git push --tags
 
+# Build & push multi-arch with proper OCI labels
 build-multi:
 	docker buildx build \
-		--builder multiarch \
-		--platform linux/amd64,linux/arm64 \
+		--builder $(BUILDER) \
+		--platform $(PLAT_PUSH) \
+		--label org.opencontainers.image.title="$(IMAGE_TITLE)" \
+		--label org.opencontainers.image.description=$(IMAGE_DESCRIPTION) \
+		--label org.opencontainers.image.url=$(IMAGE_PROJECT_URL) \
+		--label org.opencontainers.image.source=$(IMAGE_SOURCE_URL) \
+		--label org.opencontainers.image.revision="$(GIT_SHA)" \
 		--label org.opencontainers.image.version="v$(VERSION)" \
+		--label org.opencontainers.image.created="$(GIT_CREATED)" \
 		-t $(REPO):v$(VERSION) \
 		-t $(REPO):latest \
 		--push .
 
-push-images:
-	@echo "Images already pushed in build step."
-
 push-tag:
-	@echo "Tag pushed to git: v$(VERSION)"
+	@echo "Git tag pushed: v$(VERSION)"
