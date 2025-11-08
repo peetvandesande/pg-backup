@@ -74,6 +74,7 @@ Run test backup locally:
 
 ```bash
 docker run --rm \
+  --network app_default \
   -v $PWD/backups:/backups \
   -e POSTGRES_HOST=db \
   -e POSTGRES_USER=test \
