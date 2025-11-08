@@ -113,7 +113,7 @@ case "$COMPRESS" in
     ;;
 esac
 
-SIZE="$(du -h "$OUT_PATH" | awk '{print $1}')"
+SIZE="$(du -h "$OUT" | awk '{print $1}')"
 log "Dump written: $OUT ($SIZE)"
 
 # ---- checksum ---------------------------------------------------------------
