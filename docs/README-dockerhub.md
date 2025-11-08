@@ -2,6 +2,7 @@
 # 🐘 pg-backup
 [![Docker Pulls](https://img.shields.io/docker/pulls/peetvandesande/pg-backup.svg)](https://hub.docker.com/r/peetvandesande/pg-backup)
 [![Image Size](https://img.shields.io/docker/image-size/peetvandesande/pg-backup/alpine)](https://hub.docker.com/r/peetvandesande/pg-backup)
+[![GitHub](https://img.shields.io/badge/source-github-blue)](https://github.com/peetvandesande/file-backup)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/peetvandesande/pg-backup/blob/main/LICENSE)
 
 Lightweight PostgreSQL backup container that creates timestamped database dumps.  
