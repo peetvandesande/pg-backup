@@ -26,7 +26,7 @@ docker run --rm \
   peetvandesande/pg-backup:alpine
 ```
 
-### Scheduled backup ( daily at 02:30 by default )
+### Scheduled backup ( daily at 02:00 by default )
 
 ```bash
 docker run -d --name pg-backup \
@@ -70,7 +70,14 @@ docker run --rm \
 Restore a **specific** dump file:
 
 ```bash
-docker run --rm   -v /var/backups:/backups   peetvandesande/pg-backup:alpine restore /backups/mydb-20251106.sql.gz
+docker run --rm \
+  --network app_default \
+  -v /var/backups:/backups \
+  -e POSTGRES_HOST=db \
+  -e POSTGRES_USER=myuser \
+  -e POSTGRES_PASSWORD=mypass \
+  -e POSTGRES_DB=mydb \
+  peetvandesande/pg-backup:alpine restore /backups/mydb-20251106.sql.gz
 ```
 
 ---
@@ -93,24 +100,20 @@ docker run --rm   -v /var/backups:/backups   peetvandesande/pg-backup:alpine res
 | `CHOWN_UID` | *(unset)* | Apply user ownership (if set) |
 | `CHOWN_GID` | *(unset)* | Apply group ownership (if set) |
 | `CHMOD_MODE` | *(unset)* | Apply mode to dump and checksum files e.g. `0640` |
-| `EXCLUDE_PATTERNS` | *(unset)* | Space-separated table patterns to exclude from dump |
 | `RUN_ONCE` | `0` | Run backup once and exit |
 | `RUN_BACKUP_ON_START` | `0` | Run backup before cron starts |
-| `RESTORE_TARGET_DIR` | `/` | Default directory to restore into (used by `restore.sh`) |
-| `RESTORE_FILE` | *(latest)* | Specific dump file to restore (overrides auto-latest) |
-| `TZ` | *(unset)* | Set container timezone for cron logs |
 
 ### Ownership Logic Example
 
 ```bash
-# Force UID=33, keep existing GID
--e CHOWN_UID=33
+# Force UID=34, keep existing GID:
+-e CHOWN_UID=34
 
-# Force GID=33, keep existing UID
--e CHOWN_GID=33
+# Force GID=34, keep existing UID:
+-e CHOWN_GID=34
 
-# Force both explicitly
--e CHOWN_UID=33 -e CHOWN_GID=33
+# Force both explicitly:
+-e CHOWN_UID=34 -e CHOWN_GID=34
 ```
 
 ---
@@ -119,8 +122,8 @@ docker run --rm   -v /var/backups:/backups   peetvandesande/pg-backup:alpine res
 
 ```
 /backups/
-├── mydb-20251106.sql.gz
-└── mydb-20251106.sql.gz.sha256
+├── mydb-postgres-20251106.sql.gz
+└── mydb-postgres-20251106.sql.gz.sha256
 ```
 
 ---
@@ -141,8 +144,6 @@ docker run --rm   -v /var/backups:/backups   peetvandesande/pg-backup:alpine res
 services:
   pg-backup:
     image: peetvandesande/pg-backup:alpine
-    container_name: pg-backup
-    restart: unless-stopped
     environment:
       POSTGRES_HOST: db
       POSTGRES_USER: myuser
