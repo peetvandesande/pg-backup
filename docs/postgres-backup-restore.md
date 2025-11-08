@@ -19,7 +19,7 @@ This container does **not** run PostgreSQL itself — it only uses client tools.
 
 ```bash
 docker run --rm \
-  -v /var/backups/sylvie:/backups \
+  -v /var/backups:/backups \
   -e POSTGRES_HOST=nextcloud-db \
   -e POSTGRES_USER=nextcloud \
   -e POSTGRES_PASSWORD=secret \
@@ -33,7 +33,7 @@ docker run --rm \
 
 ## 🔄 Restore Procedure (Important!)
 
-### 1) Ensure volumes exist, but do **not** start services yet
+### 1) Ensure volumes and containers exist, but do **not** start services yet
 
 ```bash
 docker compose up --no-start
@@ -49,7 +49,7 @@ This safely creates:
 
 ```bash
 docker run --rm \
-  -v /var/backups/sylvie:/backups \
+  -v /var/backups:/backups \
   -e POSTGRES_HOST=nextcloud-db \
   -e POSTGRES_USER=nextcloud \
   -e POSTGRES_PASSWORD=secret \
