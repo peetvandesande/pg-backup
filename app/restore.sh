@@ -15,7 +15,7 @@ set -eu
 #   POSTGRES_HOST        (default=db)
 #   POSTGRES_PORT        (default=5432)
 #   BACKUPS_DIR          (default=/backups)  # used when searching for newest
-#   BACKUP_NAME_PREFIX   (optional)          # used when selecting newest
+#   BACKUP_NAME_PREFIX   (optional, default=$POSTGRES_DB-postgres)
 #   RESTORE_STRIP_ACL    (default=1)         # 1=strip owner/privilege lines
 #   PSQL_ON_ERROR_STOP   (default=1)         # fail fast on psql errors
 # ------------------------------------------------------------
@@ -29,7 +29,7 @@ PGPORT="${POSTGRES_PORT:-5432}"
 PGDB_ENV="${POSTGRES_DB:-}"
 
 BACKUP_DIR="${BACKUPS_DIR:-/backups}"
-PREFIX="${BACKUP_NAME_PREFIX:-}"
+PREFIX="${BACKUP_NAME_PREFIX:-$POSTGRES_DB-postgres}"
 RESTORE_STRIP_ACL="${RESTORE_STRIP_ACL:-1}"
 PSQL_ON_ERROR_STOP="${PSQL_ON_ERROR_STOP:-1}"
 
@@ -47,7 +47,7 @@ if [ -z "$DUMP_PATH" ] || [ -d "$DUMP_PATH" ]; then
   search_dir="${DUMP_PATH:-$BACKUP_DIR}"
   log "Scanning for newest archive in: $search_dir"
   if [ -n "$PREFIX" ]; then
-    newest="$(ls -1t "$search_dir"/"$PREFIX"-*.sql* 2>/dev/null | head -n1 || true)"
+    newest="$(ls -1t "$search_dir"/"$PREFIX-"*.sql* 2>/dev/null | head -n1 || true)"
   else
     newest="$(ls -1t "$search_dir"/*.sql* 2>/dev/null | head -n1 || true)"
   fi
