@@ -15,7 +15,7 @@ set -eu
 #   POSTGRES_HOST        (default=db)
 #   POSTGRES_PORT        (default=5432)
 #   BACKUPS_DIR          (default=/backups)
-#   BACKUP_NAME_PREFIX   (default=postgres-$POSTGRES_DB)
+#   BACKUP_NAME_PREFIX   (default=$POSTGRES_DB-postgres)
 #   COMPRESS             (default=gz) one of: gz | bz2 | zst | none
 #   COMPRESS_LEVEL       (optional) e.g. 1..9 for gz/bz2, 1..22 for zstd
 #   VERIFY_SHA256        (default=1)  1=write .sha256 next to dump
@@ -37,7 +37,7 @@ PGHOST="${POSTGRES_HOST:-db}"
 PGPORT="${POSTGRES_PORT:-5432}"
 
 BACKUP_DIR="${BACKUPS_DIR:-/backups}"
-PREFIX_DEFAULT="postgres-${PGDB:-db}"
+PREFIX_DEFAULT="${PGDB:-db}-postgres"
 PREFIX="${BACKUP_NAME_PREFIX:-$PREFIX_DEFAULT}"
 
 COMPRESS="${COMPRESS:-gz}"            # gz | bz2 | zst | none
