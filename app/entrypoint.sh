@@ -1,50 +1,51 @@
 #!/bin/sh
 set -eu
 
-log() { printf "%s %s\n" "$(date -Is)" "$*" ; }
+# Ensure /usr/local/bin is on PATH so 'backup' / 'restore' work as subcommands
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# ---------------------------------------------------------------------
-# Environment
-# ---------------------------------------------------------------------
-BACKUP_DEST="${BACKUP_DEST:-/backups}"
-RUN_BACKUP_ON_START="${RUN_BACKUP_ON_START:-false}" # true = run before cron
-RUN_ONCE="${RUN_ONCE:-false}"                       # true = run once and exit
-BACKUP_CHOWN="${BACKUP_CHOWN:-}"                    # e.g. "1000:1000"
-BACKUP_CHMOD="${BACKUP_CHMOD:-}"                    # e.g. "0640"
+log() { printf "%s %s\n" "$(date -Is)" "$*"; }
 
-# ---------------------------------------------------------------------
-# Ensure backups dir exists and is writable
-# ---------------------------------------------------------------------
-if [ ! -d "$BACKUP_DEST" ]; then
-  log "Creating backups dir: $BACKUP_DEST"
-  mkdir -p "$BACKUP_DEST"
-fi
+# ---- Boolean envs (1/0) -----------------------------------------------------
+RUN_ONCE="${RUN_ONCE:-0}"                   # 1 = run a single backup and exit
+RUN_BACKUP_ON_START="${RUN_BACKUP_ON_START:-0}"  # 1 = do one backup, then start cron
 
-# Test writability
-if ! sh -c "touch '$BACKUP_DEST/.write_test' && rm -f '$BACKUP_DEST/.write_test'"; then
-  log "ERROR: $BACKUP_DEST is not writable. Check bind mount or permissions."
-  exit 1
-fi
+# ---- Subcommands -------------------------------------------------------------
+CMD="${1:-}"
 
-# ---------------------------------------------------------------------
-# RUN_ONCE mode — one-shot backup and exit
-# ---------------------------------------------------------------------
-if [ "$RUN_ONCE" = "true" ]; then
-  log "RUN_ONCE=true -> performing single backup then exiting"
+case "$CMD" in
+  restore)
+    shift
+    exec /usr/local/bin/restore "$@"
+    ;;
+  backup)
+    shift
+    exec /usr/local/bin/backup "$@"
+    ;;
+  "" )
+    # fall through to default flow (optional RUN_ONCE / RUN_BACKUP_ON_START / crond)
+    ;;
+  *)
+    # If a real command was passed, execute it verbatim (e.g., /bin/sh)
+    exec "$@"
+    ;;
+esac
+
+# ---- RUN_ONCE: do a single backup and exit ----------------------------------
+if [ "$RUN_ONCE" = "1" ]; then
+  log "RUN_ONCE=1 → performing single backup then exiting"
   if /usr/local/bin/backup; then
-    log "Backup completed successfully (RUN_ONCE)"
+    log "Backup completed"
     exit 0
   else
-    log "Backup FAILED (RUN_ONCE)"
+    log "Backup FAILED"
     exit 1
   fi
 fi
 
-# ---------------------------------------------------------------------
-# Optional immediate backup before cron
-# ---------------------------------------------------------------------
-if [ "$RUN_BACKUP_ON_START" = "true" ]; then
-  log "RUN_BACKUP_ON_START=true -> running initial backup..."
+# ---- Optional: run a backup before cron starts ------------------------------
+if [ "$RUN_BACKUP_ON_START" = "1" ]; then
+  log "RUN_BACKUP_ON_START=1 → running initial backup before cron"
   if ! /usr/local/bin/backup; then
     log "Initial backup FAILED (continuing to cron)"
   else
@@ -52,10 +53,7 @@ if [ "$RUN_BACKUP_ON_START" = "true" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------------
-# Default: Start cron in foreground
-# ---------------------------------------------------------------------
+# ---- Default: start crond in foreground -------------------------------------
 CROND_BIN="$(command -v crond)"
-echo "[entrypoint] Starting crond ($CROND_BIN)…"
+log "[entrypoint] Starting crond ($CROND_BIN)…"
 exec "$CROND_BIN" -f -l 2 /dev/stdout
-
