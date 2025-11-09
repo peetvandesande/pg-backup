@@ -3,21 +3,25 @@ set -eu
 # ------------------------------------------------------------
 # pg-backup :: restore
 # - Restores a PostgreSQL dump (.sql[.gz|.bz2|.zst]) into a target DB.
+# - When dumps include pg_dumpall --globals-only, roles are recreated too.
 # - Defaults to portable restore by stripping owner/ACL lines (configurable).
 # ------------------------------------------------------------
 # Usage:
-#   restore [<dump_file_or_dir>] [<dbname>]   # if dump is a dir, selects newest by BACKUP_NAME_PREFIX
+#   restore [<dump_file_or_dir>] [<dbname>]
+#     - If <dump_file_or_dir> is a directory or empty, selects newest .sql* by BACKUP_NAME_PREFIX.
 #
 # Env vars:
-#   POSTGRES_USER        (required)
+#   POSTGRES_USER        (required)  # user used to connect for restore (ideally superuser)
 #   POSTGRES_PASSWORD    (required)
 #   POSTGRES_DB          (default: same as provided arg or env)
 #   POSTGRES_HOST        (default=db)
 #   POSTGRES_PORT        (default=5432)
+#
 #   BACKUPS_DIR          (default=/backups)  # used when searching for newest
 #   BACKUP_NAME_PREFIX   (optional, default=$POSTGRES_DB-postgres)
-#   RESTORE_STRIP_ACL    (default=1)         # 1=strip owner/privilege lines
-#   PSQL_ON_ERROR_STOP   (default=1)         # fail fast on psql errors
+#
+#   RESTORE_STRIP_ACL    (default=1)         # 1=strip ALTER OWNER/GRANT/REVOKE lines
+#   PSQL_ON_ERROR_STOP   (default=1)         # fail fast on first SQL error
 # ------------------------------------------------------------
 
 log() { printf "%s %s\n" "$(date -Is)" "$*"; }
@@ -57,6 +61,8 @@ else
 fi
 
 [ -n "${DUMP_FILE:-}" ] || { log "ERROR: No dump file found. Provide a path or ensure backups exist."; exit 1; }
+[ -f "$DUMP_FILE" ] || { log "ERROR: Dump file does not exist: $DUMP_FILE"; exit 1; }
+
 log "Selected dump: $DUMP_FILE"
 
 # infer db name if not provided
@@ -76,21 +82,17 @@ if [ -f "$SHA" ]; then
   sha256sum -c "$SHA" >/dev/null
 fi
 
-# ---- prepare filter (strip ACL/owner if requested) --------------------------
-FILTER_CMD="cat"
-if [ "$RESTORE_STRIP_ACL" = "1" ]; then
-  # Remove lines like: ALTER ... OWNER TO <role>;  GRANT ...; REVOKE ...;
-  FILTER_CMD="sed -E '/^ALTER .* OWNER TO /d; /^GRANT /d; /^REVOKE /d'"
-fi
-
 # ---- decompressor -----------------------------------------------------------
 DECOMPRESSOR="cat"
 case "$DUMP_FILE" in
-  *.sql.gz)  DECOMPRESSOR="zcat" ;;
+  *.sql.gz)  DECOMPRESSOR="zcat"  ;;
   *.sql.bz2) DECOMPRESSOR="bzcat" ;;
   *.sql.zst) DECOMPRESSOR="zstd -d -c" ;;
-  *.sql)     DECOMPRESSOR="cat" ;;
-  *) log "ERROR: Unknown dump file extension: $DUMP_FILE"; exit 1 ;;
+  *.sql)     DECOMPRESSOR="cat"   ;;
+  *)
+    log "ERROR: Unknown dump file extension: $DUMP_FILE"
+    exit 1
+    ;;
 esac
 
 # ---- restore ---------------------------------------------------------------
@@ -98,8 +100,17 @@ ON_ERROR=""
 [ "$PSQL_ON_ERROR_STOP" = "1" ] && ON_ERROR="-v ON_ERROR_STOP=1"
 
 log "Restoring into database: $TARGET_DB"
+
 set +e
-sh -c "$DECOMPRESSOR \"$DUMP_FILE\" | $FILTER_CMD | psql -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" $ON_ERROR \"$TARGET_DB\""
+if [ "$RESTORE_STRIP_ACL" = "1" ]; then
+  # Strip most owner/ACL-related lines for portability
+  $DECOMPRESSOR "$DUMP_FILE" \
+    | sed -E '/^ALTER .* OWNER TO /d; /^GRANT /d; /^REVOKE /d' \
+    | psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" $ON_ERROR "$TARGET_DB"
+else
+  $DECOMPRESSOR "$DUMP_FILE" \
+    | psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" $ON_ERROR "$TARGET_DB"
+fi
 rc=$?
 set -e
 
