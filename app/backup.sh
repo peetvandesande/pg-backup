@@ -126,7 +126,12 @@ case "$COMPRESS" in
     fi
     ;;
   none)
-    sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS > '$OUT'"
+    if [ "$INCLUDE_GLOBALS" = "1" ]; then
+      # Write globals and DB dump into the same file
+      sh -c "pg_dumpall $PGCOMMON --globals-only; pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS" > "$OUT"
+    else
+      pg_dump $PGCOMMON -d "$PGDB" $PGDUMP_OPTS > "$OUT"
+    fi
     ;;
 esac
 
