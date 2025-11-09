@@ -3,9 +3,10 @@ set -eu
 # ------------------------------------------------------------
 # pg-backup :: backup.sh
 # - Creates a timestamped PostgreSQL dump (.sql[.gz|.bz2|.zst]).
+# - Optionally includes cluster-level globals (roles, etc.).
 # - Portable by default: --no-owner --no-privileges (configurable).
 # - Busybox/Alpine/GNU userland friendly.
-# - Booleans are 1/0 (VERIFY_SHA256).
+# - Booleans are 1/0 (VERIFY_SHA256, INCLUDE_GLOBALS).
 # - chown/chmod apply automatically if CHOWN_UID/GID or CHMOD_MODE are provided.
 # ------------------------------------------------------------
 # Env vars:
@@ -14,17 +15,24 @@ set -eu
 #   POSTGRES_DB          (required)
 #   POSTGRES_HOST        (default=db)
 #   POSTGRES_PORT        (default=5432)
+#
 #   BACKUPS_DIR          (default=/backups)
-#   BACKUP_NAME_PREFIX   (default=$POSTGRES_DB-postgres)
+#   BACKUP_NAME_PREFIX   (default: <POSTGRES_DB>-postgres)
+#
 #   COMPRESS             (default=gz) one of: gz | bz2 | zst | none
 #   COMPRESS_LEVEL       (optional) e.g. 1..9 for gz/bz2, 1..22 for zstd
 #   VERIFY_SHA256        (default=1)  1=write .sha256 next to dump
-#   DUMP_NO_OWNER        (default=1)  1=add --no-owner to pg_dump
-#   DUMP_NO_PRIVILEGES   (default=1)  1=add --no-privileges to pg_dump
+#
+#   DUMP_NO_OWNER        (default=0)  1=add --no-owner to pg_dump
+#   DUMP_NO_PRIVILEGES   (default=0)  1=add --no-privileges to pg_dump
+#   INCLUDE_GLOBALS      (default=1)  1=prepend pg_dumpall --globals-only
+#                                   (requires superuser privileges)
+#
 #   CHOWN_UID            (optional) numeric uid or name
 #   CHOWN_GID            (optional) numeric gid or name
 #   CHMOD_MODE           (optional) e.g., 0640
-#   DATE_FMT             (default=%Y%m%d) UTC timestamp for filename
+#
+#   DATE_FMT             (default=%Y%m%d) UTC date for filename
 # ------------------------------------------------------------
 
 log() { printf "%s %s\n" "$(date -Is)" "$*"; }
@@ -44,8 +52,9 @@ COMPRESS="${COMPRESS:-gz}"            # gz | bz2 | zst | none
 COMPRESS_LEVEL="${COMPRESS_LEVEL:-}"  # optional
 VERIFY_SHA256="${VERIFY_SHA256:-1}"   # 1/0
 
-DUMP_NO_OWNER="${DUMP_NO_OWNER:-1}"               # 1/0
-DUMP_NO_PRIVILEGES="${DUMP_NO_PRIVILEGES:-1}"     # 1/0
+DUMP_NO_OWNER="${DUMP_NO_OWNER:-0}"               # 1/0
+DUMP_NO_PRIVILEGES="${DUMP_NO_PRIVILEGES:-0}"     # 1/0
+INCLUDE_GLOBALS="${INCLUDE_GLOBALS:-1}"           # 1/0
 
 CHOWN_UID="${CHOWN_UID:-}"
 CHOWN_GID="${CHOWN_GID:-}"
@@ -75,41 +84,54 @@ log "Starting PostgreSQL dump → ${OUT}"
 
 # ---- dump command -----------------------------------------------------------
 export PGPASSWORD="$PGPASS"
-PGCOMMON="-h $PGHOST -p $PGPORT -U $PGUSER -d $PGDB"
+PGCOMMON="-h $PGHOST -p $PGPORT -U $PGUSER"
 
 PGDUMP_OPTS=""
 [ "$DUMP_NO_OWNER" = "1" ] && PGDUMP_OPTS="$PGDUMP_OPTS --no-owner"
 [ "$DUMP_NO_PRIVILEGES" = "1" ] && PGDUMP_OPTS="$PGDUMP_OPTS --no-privileges"
 
-# Build pipeline based on compression
+# If requested, prepend pg_dumpall --globals-only (roles, etc.)
+GLOBAL_CMD=""
+if [ "$INCLUDE_GLOBALS" = "1" ]; then
+  # This requires that $PGUSER has superuser rights.
+  GLOBAL_CMD="pg_dumpall $PGCOMMON --globals-only; echo; "
+fi
+
+# ---- run pg_dump (+optional globals) with compression -----------------------
 case "$COMPRESS" in
   gz)
     if [ -n "$COMPRESS_LEVEL" ]; then
-      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | gzip -c -${COMPRESS_LEVEL} > '$OUT'"
+      sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS | gzip -c -${COMPRESS_LEVEL} > '$OUT'"
     else
-      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | gzip -c > '$OUT'"
+      sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS | gzip -c > '$OUT'"
     fi
     ;;
   bz2)
     if [ -n "$COMPRESS_LEVEL" ]; then
-      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | bzip2 -c -${COMPRESS_LEVEL} > '$OUT'"
+      sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS | bzip2 -c -${COMPRESS_LEVEL} > '$OUT'"
     else
-      sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | bzip2 -c > '$OUT'"
+      sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS | bzip2 -c > '$OUT'"
     fi
     ;;
   zst)
     if command -v zstd >/dev/null 2>&1; then
       if [ -n "$COMPRESS_LEVEL" ]; then
-        sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | zstd -q -z -T0 -${COMPRESS_LEVEL} -o '$OUT'"
+        sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS | zstd -q -z -T0 -${COMPRESS_LEVEL} -o '$OUT'"
       else
-        sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS | zstd -q -z -T0 -o '$OUT'"
+        sh -c "${GLOBAL_CMD}pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS | zstd -q -z -T0 -o '$OUT'"
       fi
     else
-      log "ERROR: zstd not available in image; set COMPRESS=none|gz|bz2" ; exit 1
+      log "ERROR: zstd not available in image; set COMPRESS=none|gz|bz2"
+      exit 1
     fi
     ;;
   none)
-    sh -c "pg_dump $PGCOMMON $PGDUMP_OPTS > '$OUT'"
+    if [ "$INCLUDE_GLOBALS" = "1" ]; then
+      # Write globals and DB dump into the same file
+      sh -c "pg_dumpall $PGCOMMON --globals-only; pg_dump $PGCOMMON -d '$PGDB' $PGDUMP_OPTS" > "$OUT"
+    else
+      pg_dump $PGCOMMON -d "$PGDB" $PGDUMP_OPTS > "$OUT"
+    fi
     ;;
 esac
 
@@ -118,30 +140,19 @@ log "Dump written: $OUT ($SIZE)"
 
 # ---- checksum ---------------------------------------------------------------
 if [ "$VERIFY_SHA256" = "1" ]; then
-  if sha256sum "$OUT" > "$SHA"; then
-    log "Checksum written: $(basename "$SHA")"
-  else
-    log "WARNING: Failed to write checksum for $OUT"
-  fi
+  sha256sum "$OUT" > "$SHA"
+  log "Wrote checksum file: $SHA"
 fi
 
-# ---- ownership / permissions (auto-apply if values provided) ----------------
-# If only one of CHOWN_UID/CHOWN_GID is set, fill the other from current file metadata.
-if [ -n "${CHOWN_UID}" ] || [ -n "${CHOWN_GID}" ]; then
-  current_uid="$(stat -c %u "$OUT" 2>/dev/null || true)"
-  current_gid="$(stat -c %g "$OUT" 2>/dev/null || true)"
-  if [ -z "${current_uid}" ] || [ -z "${current_gid}" ]; then
-    set +e
-    line="$(ls -n "$OUT" 2>/dev/null)"
-    set -e
-    if [ -n "$line" ]; then
-      current_uid="$(printf "%s\n" "$line" | awk '{print $3}')"
-      current_gid="$(printf "%s\n" "$line" | awk '{print $4}')"
-    fi
+# ---- post-processing: chown/chmod -------------------------------------------
+if [ -n "$CHOWN_UID" ] || [ -n "$CHOWN_GID" ]; then
+  target_uid="${CHOWN_UID:-}"
+  target_gid="${CHOWN_GID:-}"
+  if [ -z "$target_uid" ] && [ -n "$target_gid" ]; then
+    target_uid="$(id -u)"
+  elif [ -n "$target_uid" ] && [ -z "$target_gid" ]; then
+    target_gid="$(id -g)"
   fi
-
-  target_uid="${CHOWN_UID:-$current_uid}"
-  target_gid="${CHOWN_GID:-$current_gid}"
 
   if [ -n "$target_uid" ] && [ -n "$target_gid" ]; then
     chown "$target_uid:$target_gid" "$OUT" 2>/dev/null || true
@@ -150,8 +161,7 @@ if [ -n "${CHOWN_UID}" ] || [ -n "${CHOWN_GID}" ]; then
   fi
 fi
 
-# Apply chmod if provided
-if [ -n "${CHMOD_MODE}" ]; then
+if [ -n "${CHMOD_MODE:-}" ]; then
   chmod "$CHMOD_MODE" "$OUT" 2>/dev/null || true
   [ -f "$SHA" ] && chmod "$CHMOD_MODE" "$SHA" 2>/dev/null || true
   log "Set permissions to ${CHMOD_MODE}"

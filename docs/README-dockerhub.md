@@ -103,6 +103,10 @@ docker run --rm \
 | `CHMOD_MODE` | *(unset)* | Apply mode to dump and checksum files e.g. `0640` |
 | `RUN_ONCE` | `0` | Run backup once and exit |
 | `RUN_BACKUP_ON_START` | `0` | Run backup before cron starts |
+| `DUMP_NO_OWNER` | `0` | Omit db ownership account |
+| `DUMP_NO_PRIVILEGES` | `0` | Omit db privileges |
+| `INCLUDE_GLOBALS` | `1` | Include global privileges |
+| `RESTORE_STRIP_ACL` | `0` | Strip ACLs during restore |
 
 ### Ownership Logic Example
 
