@@ -23,7 +23,7 @@ set -eu
 #   BACKUPS_DIR          (default=/backups)
 #   BACKUP_NAME_PREFIX   (optional, default=$POSTGRES_DB-postgres)
 #
-#   RESTORE_STRIP_ACL    (default=1)  # 1=strip ALTER OWNER/GRANT/REVOKE
+#   RESTORE_STRIP_ACL    (default=0)  # 1=strip ALTER OWNER/GRANT/REVOKE
 #   PSQL_ON_ERROR_STOP   (default=0)  # 0=continue on errors, 1=stop on first
 # ------------------------------------------------------------
 
@@ -38,7 +38,7 @@ PGDB_ENV="${POSTGRES_DB:-}"
 BACKUP_DIR="${BACKUPS_DIR:-/backups}"
 PREFIX="${BACKUP_NAME_PREFIX:-$PGDB_ENV-postgres}"
 
-RESTORE_STRIP_ACL="${RESTORE_STRIP_ACL:-1}"
+RESTORE_STRIP_ACL="${RESTORE_STRIP_ACL:-0}"
 # Default to 0 so we can continue past "role already exists" and still
 # restore the main DB contents.
 PSQL_ON_ERROR_STOP="${PSQL_ON_ERROR_STOP:-0}"
