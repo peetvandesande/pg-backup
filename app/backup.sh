@@ -23,9 +23,9 @@ set -eu
 #   COMPRESS_LEVEL       (optional) e.g. 1..9 for gz/bz2, 1..22 for zstd
 #   VERIFY_SHA256        (default=1)  1=write .sha256 next to dump
 #
-#   DUMP_NO_OWNER        (default=1)  1=add --no-owner to pg_dump
-#   DUMP_NO_PRIVILEGES   (default=1)  1=add --no-privileges to pg_dump
-#   INCLUDE_GLOBALS      (default=0)  1=prepend pg_dumpall --globals-only
+#   DUMP_NO_OWNER        (default=0)  1=add --no-owner to pg_dump
+#   DUMP_NO_PRIVILEGES   (default=0)  1=add --no-privileges to pg_dump
+#   INCLUDE_GLOBALS      (default=1)  1=prepend pg_dumpall --globals-only
 #                                   (requires superuser privileges)
 #
 #   CHOWN_UID            (optional) numeric uid or name
@@ -52,9 +52,9 @@ COMPRESS="${COMPRESS:-gz}"            # gz | bz2 | zst | none
 COMPRESS_LEVEL="${COMPRESS_LEVEL:-}"  # optional
 VERIFY_SHA256="${VERIFY_SHA256:-1}"   # 1/0
 
-DUMP_NO_OWNER="${DUMP_NO_OWNER:-1}"               # 1/0
-DUMP_NO_PRIVILEGES="${DUMP_NO_PRIVILEGES:-1}"     # 1/0
-INCLUDE_GLOBALS="${INCLUDE_GLOBALS:-0}"           # 1/0
+DUMP_NO_OWNER="${DUMP_NO_OWNER:-0}"               # 1/0
+DUMP_NO_PRIVILEGES="${DUMP_NO_PRIVILEGES:-0}"     # 1/0
+INCLUDE_GLOBALS="${INCLUDE_GLOBALS:-1}"           # 1/0
 
 CHOWN_UID="${CHOWN_UID:-}"
 CHOWN_GID="${CHOWN_GID:-}"
