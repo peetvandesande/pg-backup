@@ -81,6 +81,7 @@ docker run --rm \
   -e POSTGRES_PASSWORD=test \
   -e POSTGRES_DB=testdb \
   -e RUN_ONCE=1 \
+  -e RUN_BACKUP_ON_START=1 \
   peetvandesande/pg-backup:dev
 ```
 
