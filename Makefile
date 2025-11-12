@@ -18,7 +18,7 @@ TAG_VARIANT    := -$(VARIANT)
 IMAGE_TITLE            ?= file-backup
 IMAGE_DESCRIPTION      ?= "Simple backup/restore utility (Alpine)"
 IMAGE_SOURCE_URL       ?= $(shell git remote get-url origin | sed 's/^git@/https:\/\//; s/\.git$$//; s/:/\//')
-IMAGE_REPO_URL         ?= https://hub.docker.com/r/$(REPO):$(VARIANT)
+IMAGE_REPO_URL         ?= https://hub.docker.com/r/$(REPO)
 IMAGE_AUTHORS          ?= "Peet van de Sande <peet@peetvandesande.com>"
 
 # Derived metadata
