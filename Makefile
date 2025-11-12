@@ -1,6 +1,5 @@
 # =====================[ Release / Versioning ]=====================
 # Required per-repo var:
-#   REPO ?= peetvandesande/file-backup   # or peetvandesande/pg-backup
 REPO ?= peetvandesande/pg-backup
 
 PLAT_BUILD             ?= linux/amd64
@@ -18,8 +17,9 @@ TAG_VARIANT    := -$(VARIANT)
 # Optional metadata (edit per project)
 IMAGE_TITLE            ?= file-backup
 IMAGE_DESCRIPTION      ?= "Simple backup/restore utility (Alpine)"
-IMAGE_SOURCE_URL    ?= $(shell git remote get-url origin | sed 's/^git@/https:\/\//; s/\.git$$//; s/:/\//')
-IMAGE_PROJECT_URL   ?= $(IMAGE_SOURCE_URL)
+IMAGE_SOURCE_URL       ?= $(shell git remote get-url origin | sed 's/^git@/https:\/\//; s/\.git$$//; s/:/\//')
+IMAGE_REPO_URL         ?= https://hub.docker.com/r/$(REPO):$(VARIANT)
+IMAGE_AUTHORS          ?= "Peet van de Sande <peet@peetvandesande.com>"
 
 # Derived metadata
 GIT_SHA                := $(shell git rev-parse --short=8 HEAD)
@@ -118,11 +118,12 @@ build-multi:
 		--platform $(PLAT_PUSH) \
 		--label org.opencontainers.image.title="$(IMAGE_TITLE)" \
 		--label org.opencontainers.image.description=$(IMAGE_DESCRIPTION) \
-		--label org.opencontainers.image.url=$(IMAGE_PROJECT_URL) \
+		--label org.opencontainers.image.url=$(IMAGE_REPO_URL) \
 		--label org.opencontainers.image.source=$(IMAGE_SOURCE_URL) \
 		--label org.opencontainers.image.revision="$(GIT_SHA)" \
 		--label org.opencontainers.image.version="v$(VERSION)" \
 		--label org.opencontainers.image.created="$(GIT_CREATED)" \
+		--label org.opencontainers.image.authors=$(IMAGE_AUTHORS) \
 		-t $(REPO):v$(VERSION) \
 		-t $(REPO):latest \
 		-t $(REPO):v$(VERSION)$(TAG_VARIANT) \
